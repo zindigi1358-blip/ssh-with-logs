@@ -1,0 +1,120 @@
+# ===============================
+# OpenSSH + Tailscale Setup Script (Advanced)
+# Run as Administrator
+# ===============================
+
+# -------------------------------
+# LOG FILE SETUP
+# -------------------------------
+$logPath = "$env:USERPROFILE\Desktop\setup-log.txt"
+
+function Write-Log {
+    param ($msg)
+    $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $line = "[$time] $msg"
+    Write-Host $line
+    Add-Content -Path $logPath -Value $line
+}
+
+Write-Log "===== SCRIPT STARTED ====="
+
+# -------------------------------
+# INTERNET CHECK
+# -------------------------------
+Write-Log "Checking internet connection..."
+
+try {
+    $net = Test-NetConnection -ComputerName "google.com" -WarningAction SilentlyContinue
+    if ($net.PingSucceeded) {
+        Write-Log "Internet is AVAILABLE"
+    } else {
+        Write-Log "Internet NOT available. Exiting..."
+        exit
+    }
+} catch {
+    Write-Log "Internet check failed. Exiting..."
+    exit
+}
+
+# -------------------------------
+# TAILSCALE CHECK
+# -------------------------------
+Write-Log "Checking Tailscale..."
+
+$tailscale = Get-Command tailscale -ErrorAction SilentlyContinue
+
+if ($tailscale) {
+    Write-Log "Tailscale already installed. Skipping..."
+} else {
+    Write-Log "Tailscale NOT found. Please install manually or add installer step."
+}
+
+# -------------------------------
+# OPENSSH CHECK
+# -------------------------------
+Write-Log "Checking OpenSSH Server..."
+
+$sshFeature = Get-WindowsCapability -Online |
+    Where-Object { $_.Name -like "OpenSSH.Server*" }
+
+if ($sshFeature.State -eq "Installed") {
+    Write-Log "OpenSSH already installed. Skipping installation..."
+} else {
+
+    Write-Log "Installing OpenSSH Server..."
+
+    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+
+    # WAIT LOOP UNTIL INSTALLED
+    do {
+        Start-Sleep -Seconds 5
+        $sshFeature = Get-WindowsCapability -Online |
+            Where-Object { $_.Name -like "OpenSSH.Server*" }
+
+        Write-Log "Current status: $($sshFeature.State)"
+
+    } while ($sshFeature.State -ne "Installed")
+
+    Write-Log "OpenSSH installation completed."
+}
+
+# -------------------------------
+# START SSH SERVICE
+# -------------------------------
+Write-Log "Starting sshd service..."
+Start-Service sshd -ErrorAction SilentlyContinue
+
+# -------------------------------
+# AUTO START ENABLE
+# -------------------------------
+Write-Log "Setting sshd to automatic startup..."
+Set-Service -Name sshd -StartupType Automatic
+
+# -------------------------------
+# FIREWALL RULE CHECK
+# -------------------------------
+Write-Log "Checking firewall rule..."
+
+$fw = Get-NetFirewallRule -Name "sshd" -ErrorAction SilentlyContinue
+
+if ($fw) {
+    Write-Log "Firewall rule already exists."
+} else {
+    Write-Log "Creating firewall rule..."
+
+    New-NetFirewallRule `
+        -Name "sshd" `
+        -DisplayName "OpenSSH Server" `
+        -Enabled True `
+        -Direction Inbound `
+        -Protocol TCP `
+        -Action Allow `
+        -LocalPort 22
+}
+
+# -------------------------------
+# FINAL STATUS
+# -------------------------------
+Write-Log "All tasks completed successfully."
+Write-Log "===== SCRIPT END ====="
+
